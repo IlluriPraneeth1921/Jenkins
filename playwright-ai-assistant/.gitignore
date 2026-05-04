@@ -1,0 +1,8 @@
+node_modules/
+playwright-report/
+test-results/
+reports/*.html
+reports/*.json
+reports/*.eml
+generated-tests/*.spec.ts
+.env

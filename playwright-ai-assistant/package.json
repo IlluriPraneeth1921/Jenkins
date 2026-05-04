@@ -1,0 +1,40 @@
+{
+  "name": "playwright-ai-assistant",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI-assisted Playwright TypeScript workflow for test-case generation, script generation, review, execution, and email reporting.",
+  "main": "index.js",
+  "scripts": {
+    "ai:test": "tsx src/cli.ts",
+    "generate:cases": "tsx src/cli.ts requirements-to-cases",
+    "generate:scripts": "tsx src/cli.ts cases-to-script",
+    "review:script": "tsx src/cli.ts review-script",
+    "run:tests": "tsx src/cli.ts run-tests",
+    "draft:email": "tsx src/cli.ts draft-email",
+    "typecheck": "tsc --noEmit",
+    "install:browsers": "playwright install chromium"
+  },
+  "keywords": [
+    "playwright",
+    "typescript",
+    "ai",
+    "testing",
+    "automation"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@playwright/test": "^1.59.1",
+    "commander": "^13.1.0",
+    "dotenv": "^17.4.2",
+    "nodemailer": "^8.0.7",
+    "openai": "^6.35.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/nodemailer": "^8.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
