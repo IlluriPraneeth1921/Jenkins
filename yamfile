@@ -506,7 +506,8 @@ stages:
           'Content-Type' = 'application/json'
         }
 
-        $testPlan = @($(testPlan) | ConvertFrom-Json)
+        $testPlanJson = $env:TEST_PLAN_JSON
+        $testPlan = @($testPlanJson | ConvertFrom-Json)
         if ($testPlan.Count -eq 0) {
           Write-Host "##vso[task.logissue type=error]No child pipelines were queued for orchestration."
           exit 1
@@ -665,6 +666,7 @@ stages:
       displayName: 'Queue and Track Child Pipelines'
       env:
         ADO_PAT: $(sharedpat)
+        TEST_PLAN_JSON: $(testPlan)
 
 #############################################################################
 # STAGE 3: CONSOLIDATE RESULTS
