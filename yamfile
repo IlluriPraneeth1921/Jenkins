@@ -368,12 +368,14 @@ stages:
         $selectedTests | Sort-Object | ForEach-Object { Write-Host "   • $_" }
         Write-Host ""
         
-        # Calculate number of batches needed
-        $maxParallel = ${{ parameters.MaxParallelTests }}
-        $batchCount = [Math]::Ceiling($selectedTests.Count / $maxParallel)
+        # Cap the number of child pipelines that can run at the same time.
+        $maxParallel = [Math]::Max(1, [int]${{ parameters.MaxParallelTests }})
+        $parallelChildCount = [Math]::Min($maxParallel, $selectedTests.Count)
+        $batchCount = [Math]::Ceiling($selectedTests.Count / $parallelChildCount)
         
-        Write-Host "⚙️  Max Parallel: $maxParallel"
-        Write-Host "📦 Total Batches Needed: $batchCount"
+        Write-Host "⚙️  Max Parallel Requested: $maxParallel"
+        Write-Host "🚀 Child Pipelines Running In Parallel: $parallelChildCount"
+        Write-Host "📦 Execution Waves Needed: $batchCount"
         Write-Host ""
         
         # Create target directory
@@ -387,740 +389,247 @@ stages:
         Write-Host "##vso[task.setvariable variable=tPath;isOutput=true]$newTargetPath"
         Write-Host "##vso[task.setvariable variable=selectedTests;isOutput=true]$($selectedTests -join ',')"
         Write-Host "##vso[task.setvariable variable=batchCount;isOutput=true]$batchCount"
+        Write-Host "##vso[task.setvariable variable=parallelChildCount;isOutput=true]$parallelChildCount"
         
       name: setup
       displayName: 'Validate and Setup'
 
 #############################################################################
-# STAGE 2: TRIGGER TESTS IN PARALLEL - SEPARATE JOBS APPROACH
+# STAGE 2: TRIGGER TESTS WITH A SINGLE MASTER CONTROLLER
 #############################################################################
 - stage: TriggerTests
-  displayName: '🚀 Trigger Test Pipelines (Parallel Execution)'
+  displayName: '🚀 Trigger Test Pipelines (Controlled Parallel Execution)'
   dependsOn: Setup
   variables:
     tPath: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.tPath'] ]
     selectedTests: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.selectedTests'] ]
+    parallelChildCount: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.parallelChildCount'] ]
   jobs:
-  
-  # PersonHistory
-  - job: Job_PersonHistory
-    displayName: 'PersonHistory'
-    condition: contains(variables['selectedTests'], 'PersonHistory')
+  - job: TriggerSelectedPipelines
+    displayName: 'Queue Selected Child Pipelines'
     pool:
       name: Interactive
     timeoutInMinutes: 480
     steps:
     - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger PersonHistory Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_PersonHistory'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath)\PersonHistory, Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ProfilePicture
-  - job: Job_ProfilePicture
-    displayName: 'ProfilePicture'
-    condition: contains(variables['selectedTests'], 'ProfilePicture')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ProfilePicture Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_ProfilePicture'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath)\ProfilePicture, Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # MessageModule
-  - job: Job_MessageModule
-    displayName: 'MessageModule'
-    condition: contains(variables['selectedTests'], 'MessageModule')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger MessageModule Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_MessageModule'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ProgressNote
-  - job: Job_ProgressNote
-    displayName: 'ProgressNote'
-    condition: contains(variables['selectedTests'], 'ProgressNote')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ProgressNote Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_ProgressNote'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # Notification
-  - job: Job_Notification
-    displayName: 'Notification'
-    condition: contains(variables['selectedTests'], 'Notification')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger Notification Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_Notification'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # PostCrisisReview
-  - job: Job_PostCrisisReview
-    displayName: 'PostCrisisReview'
-    condition: contains(variables['selectedTests'], 'PostCrisisReview')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger PostCrisisReview Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_PostCrisisReview'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ProgramApplication
-  - job: Job_ProgramApplication
-    displayName: 'ProgramApplication'
-    condition: contains(variables['selectedTests'], 'ProgramApplication')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ProgramApplication Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_ProgramApplication'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ProgramConfig
-  - job: Job_ProgramConfig
-    displayName: 'ProgramConfig'
-    condition: contains(variables['selectedTests'], 'ProgramConfig')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ProgramConfig Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_STD_F1_RegressionTest_ProgramConfig'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # Announcement
-  - job: Job_Announcement
-    displayName: 'Announcement'
-    condition: contains(variables['selectedTests'], 'Announcement')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger Announcement Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_Annoucement'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # StaffModule
-  - job: Job_StaffModule
-    displayName: 'StaffModule'
-    condition: contains(variables['selectedTests'], 'StaffModule')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger StaffModule Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_StaffModule'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # OrganizationModule
-  - job: Job_OrganizationModule
-    displayName: 'OrganizationModule'
-    condition: contains(variables['selectedTests'], 'OrganizationModule')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger OrganizationModule Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_Regression_OrganizationModule_CommonBrowser'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # PersonProfile
-  - job: Job_PersonProfile
-    displayName: 'PersonProfile'
-    condition: contains(variables['selectedTests'], 'PersonProfile')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger PersonProfile Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_Std_QC_RegressionTest_Person Profile (SOGI)'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ReportableEvents
-  - job: Job_ReportableEvents
-    displayName: 'ReportableEvents'
-    condition: contains(variables['selectedTests'], 'ReportableEvents')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ReportableEvents Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_Reportable_Events'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ServiceDef_01
-  - job: Job_ServiceDef_01
-    displayName: 'ServiceDef_01'
-    condition: contains(variables['selectedTests'], 'ServiceDef_01')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ServiceDef_01 Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_ServiceDef_01'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ServiceDef_02
-  - job: Job_ServiceDef_02
-    displayName: 'ServiceDef_02'
-    condition: contains(variables['selectedTests'], 'ServiceDef_02')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ServiceDef_02 Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_ServiceDef_02'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ProgramEnrollmentNew
-  - job: Job_ProgramEnrollmentNew
-    displayName: 'ProgramEnrollmentNew'
-    condition: contains(variables['selectedTests'], 'ProgramEnrollmentNew')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ProgramEnrollmentNew Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_Std_f1_RegressionTest_ProgramEnrollmentNew'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # SystemAttachments
-  - job: Job_SystemAttachments
-    displayName: 'SystemAttachments'
-    condition: contains(variables['selectedTests'], 'SystemAttachments')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger SystemAttachments Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_SystemAttachments'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # AttachmentsModule
-  - job: Job_AttachmentsModule
-    displayName: 'AttachmentsModule'
-    condition: contains(variables['selectedTests'], 'AttachmentsModule')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger AttachmentsModule Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_AttachmentsModule'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # BMP
-  - job: Job_BMP
-    displayName: 'BMP'
-    condition: contains(variables['selectedTests'], 'BMP')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger BMP Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_BMP'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # BulkAssignment
-  - job: Job_BulkAssignment
-    displayName: 'BulkAssignment'
-    condition: contains(variables['selectedTests'], 'BulkAssignment')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger BulkAssignment Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_Std_qc_RegressionTest_BulkAssignment'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # CrisisBedIntakePacket
-  - job: Job_CrisisBedIntakePacket
-    displayName: 'CrisisBedIntakePacket'
-    condition: contains(variables['selectedTests'], 'CrisisBedIntakePacket')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger CrisisBedIntakePacket Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_STND_RegressionTest_CrisisBedIntakePacket'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # CrisisHousingAssessment
-  - job: Job_CrisisHousingAssessment
-    displayName: 'CrisisHousingAssessment'
-    condition: contains(variables['selectedTests'], 'CrisisHousingAssessment')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger CrisisHousingAssessment Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_STND_RegressionTest_Crisis_Housing_Assessment'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # CrisisIntake
-  - job: Job_CrisisIntake
-    displayName: 'CrisisIntake'
-    condition: contains(variables['selectedTests'], 'CrisisIntake')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger CrisisIntake Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_STND_RegressionTest_Crisis_Intake'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # CrisisHomeIntake
-  - job: Job_CrisisHomeIntake
-    displayName: 'CrisisHomeIntake'
-    condition: contains(variables['selectedTests'], 'CrisisHomeIntake')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger CrisisHomeIntake Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_Std_CrisisHomeIntakeModule'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # CrisisTemporaryHousing
-  - job: Job_CrisisTemporaryHousing
-    displayName: 'CrisisTemporaryHousing'
-    condition: contains(variables['selectedTests'], 'CrisisTemporaryHousing')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger CrisisTemporaryHousing Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_STND_RegressionTest_Crisis_Temporary_Housing'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # CrisisHousingAgreement
-  - job: Job_CrisisHousingAgreement
-    displayName: 'CrisisHousingAgreement'
-    condition: contains(variables['selectedTests'], 'CrisisHousingAgreement')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger CrisisHousingAgreement Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_STND_RegressionTest_Crisis_Housing_Agreement'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # DeathandMortality
-  - job: Job_DeathandMortality
-    displayName: 'DeathandMortality'
-    condition: contains(variables['selectedTests'], 'DeathandMortality')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger DeathandMortality Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_DeathandMortality'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # EmergencyDisposition
-  - job: Job_EmergencyDisposition
-    displayName: 'EmergencyDisposition'
-    condition: contains(variables['selectedTests'], 'EmergencyDisposition')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger EmergencyDisposition Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_EmergencyDisposition'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # GrievanceAppeal_01
-  - job: Job_GrievanceAppeal_01
-    displayName: 'GrievanceAppeal_01'
-    condition: contains(variables['selectedTests'], 'GrievanceAppeal_01')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger GrievanceAppeal_01 Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_GrievanceAppeal_01'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # GrievanceAppeal_02
-  - job: Job_GrievanceAppeal_02
-    displayName: 'GrievanceAppeal_02'
-    condition: contains(variables['selectedTests'], 'GrievanceAppeal_02')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger GrievanceAppeal_02 Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_GrievanceAppeal_02'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # Help
-  - job: Job_Help
-    displayName: 'Help'
-    condition: contains(variables['selectedTests'], 'Help')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger Help Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_Help'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # LocationsModule
-  - job: Job_LocationsModule
-    displayName: 'LocationsModule'
-    condition: contains(variables['selectedTests'], 'LocationsModule')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger LocationsModule Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_LocationsModule'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # IndividualSupportTeam
-  - job: Job_IndividualSupportTeam
-    displayName: 'IndividualSupportTeam'
-    condition: contains(variables['selectedTests'], 'IndividualSupportTeam')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger IndividualSupportTeam Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Test_Auto_STND_Regression_IndividualSupportTeam'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # MiniPCP
-  - job: Job_MiniPCP
-    displayName: 'MiniPCP'
-    condition: contains(variables['selectedTests'], 'MiniPCP')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger MiniPCP Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_STND_Regression Test_Mini PCP_F1'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # ConfigDashboard
-  - job: Job_ConfigDashboard
-    displayName: 'ConfigDashboard'
-    condition: contains(variables['selectedTests'], 'ConfigDashboard')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger ConfigDashboard Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_STDF1_Config Dashboard'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
-  
-  # PersonMaintenance
-  - job: Job_PersonMaintenance
-    displayName: 'PersonMaintenance'
-    condition: contains(variables['selectedTests'], 'PersonMaintenance')
-    pool:
-      name: Interactive
-    timeoutInMinutes: 480
-    steps:
-    - checkout: none
-    - task: TriggerBuild@4
-      displayName: 'Trigger PersonMaintenance Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: 'Carity_Std_f1_RegressionTest_PersonMaintenance'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(tPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
+    - powershell: |
+        $selectedTestsRaw = "$(selectedTests)"
+        $targetPath = "$(tPath)"
+        $organizationUrl = "$(orgUrl)"
+        $projectName = "$(projectName)"
+        $parallelLimit = [Math]::Max(1, [int]"$(parallelChildCount)")
+        $browser = '${{ parameters.Browser }}'
+        $environment = '${{ parameters.Environment }}'
+        $oauthToken = $env:SYSTEM_ACCESSTOKEN
+        $patToken = "$(sharedpat)"
+        
+        if ([string]::IsNullOrWhiteSpace($selectedTestsRaw)) {
+          Write-Host "No selected tests found."
+          exit 0
+        }
+        
+        $selectedTests = $selectedTestsRaw.Split(',', [System.StringSplitOptions]::RemoveEmptyEntries) | ForEach-Object { $_.Trim() }
+        
+        if ($selectedTests.Count -eq 0) {
+          Write-Host "No selected tests found."
+          exit 0
+        }
+        
+        $pipelineMap = @{
+          'PersonHistory'           = @{ Definition = 'Test_Auto_STND_Regression_PersonHistory'; XPath = "$targetPath\PersonHistory" }
+          'ProfilePicture'          = @{ Definition = 'Test_Auto_STND_Regression_ProfilePicture'; XPath = "$targetPath\ProfilePicture" }
+          'MessageModule'           = @{ Definition = 'Test_Auto_STND_Regression_MessageModule'; XPath = $targetPath }
+          'ProgressNote'            = @{ Definition = 'Test_Auto_STND_Regression_ProgressNote'; XPath = $targetPath }
+          'Notification'            = @{ Definition = 'Test_Auto_STND_Regression_Notification'; XPath = $targetPath }
+          'PostCrisisReview'        = @{ Definition = 'Test_Auto_STND_Regression_PostCrisisReview'; XPath = $targetPath }
+          'ProgramApplication'      = @{ Definition = 'Test_Auto_STND_Regression_ProgramApplication'; XPath = $targetPath }
+          'ProgramConfig'           = @{ Definition = 'Carity_STD_F1_RegressionTest_ProgramConfig'; XPath = $targetPath }
+          'Announcement'            = @{ Definition = 'Test_Auto_STND_Regression_Annoucement'; XPath = $targetPath }
+          'StaffModule'             = @{ Definition = 'Test_Auto_STND_Regression_StaffModule'; XPath = $targetPath }
+          'OrganizationModule'      = @{ Definition = 'Test_Auto_Regression_OrganizationModule_CommonBrowser'; XPath = $targetPath }
+          'PersonProfile'           = @{ Definition = 'Carity_Std_QC_RegressionTest_Person Profile (SOGI)'; XPath = $targetPath }
+          'ReportableEvents'        = @{ Definition = 'Test_Auto_STND_Regression_Reportable_Events'; XPath = $targetPath }
+          'ServiceDef_01'           = @{ Definition = 'Test_Auto_STND_Regression_ServiceDef_01'; XPath = $targetPath }
+          'ServiceDef_02'           = @{ Definition = 'Test_Auto_STND_Regression_ServiceDef_02'; XPath = $targetPath }
+          'ProgramEnrollmentNew'    = @{ Definition = 'Carity_Std_f1_RegressionTest_ProgramEnrollmentNew'; XPath = $targetPath }
+          'SystemAttachments'       = @{ Definition = 'Test_Auto_STND_Regression_SystemAttachments'; XPath = $targetPath }
+          'AttachmentsModule'       = @{ Definition = 'Test_Auto_STND_Regression_AttachmentsModule'; XPath = $targetPath }
+          'BMP'                     = @{ Definition = 'Test_Auto_STND_Regression_BMP'; XPath = $targetPath }
+          'BulkAssignment'          = @{ Definition = 'Carity_Std_qc_RegressionTest_BulkAssignment'; XPath = $targetPath }
+          'CrisisBedIntakePacket'   = @{ Definition = 'Carity_STND_RegressionTest_CrisisBedIntakePacket'; XPath = $targetPath }
+          'CrisisHousingAssessment' = @{ Definition = 'Carity_STND_RegressionTest_Crisis_Housing_Assessment'; XPath = $targetPath }
+          'CrisisIntake'            = @{ Definition = 'Carity_STND_RegressionTest_Crisis_Intake'; XPath = $targetPath }
+          'CrisisHomeIntake'        = @{ Definition = 'Carity_Std_CrisisHomeIntakeModule'; XPath = $targetPath }
+          'CrisisTemporaryHousing'  = @{ Definition = 'Carity_STND_RegressionTest_Crisis_Temporary_Housing'; XPath = $targetPath }
+          'CrisisHousingAgreement'  = @{ Definition = 'Carity_STND_RegressionTest_Crisis_Housing_Agreement'; XPath = $targetPath }
+          'DeathandMortality'       = @{ Definition = 'Test_Auto_STND_Regression_DeathandMortality'; XPath = $targetPath }
+          'EmergencyDisposition'    = @{ Definition = 'Test_Auto_STND_Regression_EmergencyDisposition'; XPath = $targetPath }
+          'GrievanceAppeal_01'      = @{ Definition = 'Test_Auto_STND_Regression_GrievanceAppeal_01'; XPath = $targetPath }
+          'GrievanceAppeal_02'      = @{ Definition = 'Test_Auto_STND_Regression_GrievanceAppeal_02'; XPath = $targetPath }
+          'Help'                    = @{ Definition = 'Test_Auto_STND_Regression_Help'; XPath = $targetPath }
+          'LocationsModule'         = @{ Definition = 'Test_Auto_STND_Regression_LocationsModule'; XPath = $targetPath }
+          'IndividualSupportTeam'   = @{ Definition = 'Test_Auto_STND_Regression_IndividualSupportTeam'; XPath = $targetPath }
+          'MiniPCP'                 = @{ Definition = 'Carity_STND_Regression Test_Mini PCP_F1'; XPath = $targetPath }
+          'ConfigDashboard'         = @{ Definition = 'Carity_STDF1_Config Dashboard'; XPath = $targetPath }
+          'PersonMaintenance'       = @{ Definition = 'Carity_Std_f1_RegressionTest_PersonMaintenance'; XPath = $targetPath }
+        }
+        
+        if (-not [string]::IsNullOrWhiteSpace($oauthToken)) {
+          $authHeaders = @{ Authorization = "Bearer $oauthToken" }
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($patToken)) {
+          $basicToken = [Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(":$patToken"))
+          $authHeaders = @{ Authorization = "Basic $basicToken" }
+        }
+        else {
+          throw "No authentication token available to queue child pipelines."
+        }
+        
+        $jsonHeaders = @{}
+        foreach ($key in $authHeaders.Keys) {
+          $jsonHeaders[$key] = $authHeaders[$key]
+        }
+        $jsonHeaders['Content-Type'] = 'application/json'
+        
+        $encodedProject = [System.Uri]::EscapeDataString($projectName)
+        $definitionBaseUrl = "$organizationUrl$encodedProject/_apis/build/definitions"
+        $buildBaseUrl = "$organizationUrl$encodedProject/_apis/build/builds"
+        $definitionIdCache = @{}
+        $pendingTests = [System.Collections.Generic.Queue[string]]::new()
+        $activeBuilds = [System.Collections.Generic.List[object]]::new()
+        $failures = [System.Collections.Generic.List[string]]::new()
+        $pollSeconds = 30
+        
+        foreach ($testName in $selectedTests) {
+          $pendingTests.Enqueue($testName)
+        }
+        
+        function Get-DefinitionId {
+          param(
+            [string]$DefinitionName
+          )
+        
+          if ($definitionIdCache.ContainsKey($DefinitionName)) {
+            return $definitionIdCache[$DefinitionName]
+          }
+        
+          $definitionLookupUrl = "{0}?name={1}&api-version=7.1" -f $definitionBaseUrl, [System.Uri]::EscapeDataString($DefinitionName)
+          $definitionResponse = Invoke-RestMethod -Method Get -Uri $definitionLookupUrl -Headers $authHeaders
+          if (-not $definitionResponse.value -or $definitionResponse.count -lt 1) {
+            throw "Unable to locate child pipeline definition '$DefinitionName'."
+          }
+        
+          $definitionIdCache[$DefinitionName] = $definitionResponse.value[0].id
+          return $definitionIdCache[$DefinitionName]
+        }
+        
+        function Queue-ChildPipeline {
+          param(
+            [string]$TestName
+          )
+        
+          if (-not $pipelineMap.ContainsKey($TestName)) {
+            throw "No child pipeline mapping found for '$TestName'."
+          }
+        
+          $definitionName = $pipelineMap[$TestName].Definition
+          $xPathValue = $pipelineMap[$TestName].XPath
+          $definitionId = Get-DefinitionId -DefinitionName $definitionName
+          $queueBody = @{
+            definition = @{
+              id = $definitionId
+            }
+            parameters = (@{
+              xPath = $xPathValue
+              Browser = $browser
+              Environment = $environment
+            } | ConvertTo-Json -Compress)
+          } | ConvertTo-Json -Depth 5 -Compress
+        
+          $queuedBuild = Invoke-RestMethod -Method Post -Uri "$buildBaseUrl?api-version=7.1" -Headers $jsonHeaders -Body $queueBody
+        
+          return [pscustomobject]@{
+            TestName       = $TestName
+            DefinitionName = $definitionName
+            BuildId        = [int]$queuedBuild.id
+          }
+        }
+        
+        function Get-ChildBuildStatus {
+          param(
+            [int]$BuildId
+          )
+        
+          return Invoke-RestMethod -Method Get -Uri "$buildBaseUrl/$BuildId?api-version=7.1" -Headers $authHeaders
+        }
+        
+        Write-Host "========================================="
+        Write-Host "MASTER CONTROLLER"
+        Write-Host "========================================="
+        Write-Host "Selected child pipelines: $($selectedTests.Count)"
+        Write-Host "Maximum child pipelines in parallel: $parallelLimit"
+        Write-Host ""
+        
+        while ($pendingTests.Count -gt 0 -or $activeBuilds.Count -gt 0) {
+          while ($pendingTests.Count -gt 0 -and $activeBuilds.Count -lt $parallelLimit) {
+            $nextTest = $pendingTests.Dequeue()
+        
+            try {
+              $childBuild = Queue-ChildPipeline -TestName $nextTest
+              $activeBuilds.Add($childBuild)
+              Write-Host "[$($childBuild.TestName)] queued build $($childBuild.BuildId). Active children: $($activeBuilds.Count)"
+            }
+            catch {
+              $failures.Add("$nextTest => queue failed. $($_.Exception.Message)")
+              Write-Host "##vso[task.logissue type=warning]$nextTest queue failed. $($_.Exception.Message)"
+            }
+          }
+        
+          if ($activeBuilds.Count -eq 0) {
+            continue
+          }
+        
+          Start-Sleep -Seconds $pollSeconds
+        
+          for ($index = $activeBuilds.Count - 1; $index -ge 0; $index--) {
+            $activeBuild = $activeBuilds[$index]
+        
+            try {
+              $buildStatus = Get-ChildBuildStatus -BuildId $activeBuild.BuildId
+              Write-Host "[$($activeBuild.TestName)] build $($activeBuild.BuildId) status: $($buildStatus.status), result: $($buildStatus.result)"
+        
+              if ($buildStatus.status -eq 'completed') {
+                if ($buildStatus.result -in @('succeeded', 'partiallySucceeded')) {
+                  Write-Host "[$($activeBuild.TestName)] child pipeline completed successfully."
+                }
+                else {
+                  $failures.Add("$($activeBuild.TestName) => completed with result '$($buildStatus.result)'")
+                  Write-Host "##vso[task.logissue type=warning]$($activeBuild.TestName) completed with result '$($buildStatus.result)'."
+                }
+        
+                $activeBuilds.RemoveAt($index)
+              }
+            }
+            catch {
+              $failures.Add("$($activeBuild.TestName) => status check failed. $($_.Exception.Message)")
+              $activeBuilds.RemoveAt($index)
+              Write-Host "##vso[task.logissue type=warning]$($activeBuild.TestName) status check failed. $($_.Exception.Message)"
+            }
+          }
+        }
+        
+        if ($failures.Count -gt 0) {
+          Write-Host ""
+          Write-Host "Child pipeline failures:"
+          $failures | ForEach-Object { Write-Host " - $_" }
+          exit 1
+        }
+        
+        Write-Host ""
+        Write-Host "All selected child pipelines completed successfully."
+      displayName: 'Queue and monitor child pipelines'
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
 #############################################################################
 # STAGE 3: CONSOLIDATE RESULTS
@@ -1133,6 +642,7 @@ stages:
   condition: always()
   variables:
     tPath: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.tPath'] ]
+    parallelChildCount: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.parallelChildCount'] ]
   jobs:
   - job: PublishResults
     displayName: 'Analyze and Publish Results'
@@ -1205,7 +715,8 @@ stages:
         Write-Host "Environment: ${{ parameters.Environment }}"
         Write-Host "Browser: ${{ parameters.Browser }}"
         Write-Host "Mode: ${{ parameters.ExecutionMode }}"
-        Write-Host "Max Parallel: ${{ parameters.MaxParallelTests }}"
+        Write-Host "Requested Parallel Child Pipelines: ${{ parameters.MaxParallelTests }}"
+        Write-Host "Actual Parallel Child Pipelines: $(parallelChildCount)"
         Write-Host ""
         Write-Host "Results: $(tPath)"
         Write-Host "Artifact: RegressionTestResults"
