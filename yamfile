@@ -596,10 +596,9 @@ stages:
             }
             sourceBranch = $sourceBranch
             parameters = ($parameterObject | ConvertTo-Json -Compress)
-            templateParameters = $parameterObject
           } | ConvertTo-Json -Depth 10
 
-          $queuedBuild = Invoke-RestMethod -Method Post -Uri $queueUrl -Headers $headers -Body $queueBody
+          $queuedBuild = Invoke-RestMethod -Method Post -Uri $queueUrl -Headers $headers -ContentType 'application/json' -Body $queueBody
 
           @(
             "TestName: $($TestItem.testName)"
