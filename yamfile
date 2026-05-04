@@ -523,7 +523,7 @@ stages:
           }
 
           $encodedName = [Uri]::EscapeDataString($DefinitionName)
-          $definitionUrl = "$organizationUrl$projectName/_apis/build/definitions?name=$encodedName&api-version=7.1"
+          $definitionUrl = "$organizationUrl$projectName/_apis/build/definitions?name=$encodedName&api-version=6.1"
           $response = Invoke-RestMethod -Method Get -Uri $definitionUrl -Headers $headers
           $definition = $response.value | Where-Object { $_.name -eq $DefinitionName } | Select-Object -First 1
 
@@ -541,7 +541,7 @@ stages:
           )
 
           $definitionId = Get-BuildDefinitionId -DefinitionName $TestItem.buildDefinition
-          $queueUrl = "$organizationUrl$projectName/_apis/build/builds?api-version=7.1"
+          $queueUrl = "$organizationUrl$projectName/_apis/build/builds?api-version=6.1"
           $parameterObject = @{
             xPath = $TestItem.resultPath
             Browser = '${{ parameters.Browser }}'
@@ -581,7 +581,7 @@ stages:
             [int]$BuildId
           )
 
-          $statusUrl = "$organizationUrl$projectName/_apis/build/builds/$BuildId?api-version=7.1"
+          $statusUrl = "$organizationUrl$projectName/_apis/build/builds/$BuildId?api-version=6.1"
           return Invoke-RestMethod -Method Get -Uri $statusUrl -Headers $headers
         }
 
