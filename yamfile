@@ -422,8 +422,8 @@ stages:
         New-Item -ItemType Directory -Force -Path $newTargetPath | Out-Null
         Write-Host "✓ Created: $newTargetPath"
 
-        # Create a matrix payload and dedicated result folder for each selected test
-        $testMatrix = [ordered]@{}
+        # Create a queued execution plan and dedicated result folder for each selected test
+        $testPlan = @()
         foreach ($test in $selectedTests) {
           $buildDefinition = $testDefinitions[$test]
           if (-not $buildDefinition) {
@@ -440,26 +440,26 @@ stages:
             "RequestedByBuildId: $(Build.BuildId)"
           ) | Set-Content -Path (Join-Path $resultPath 'trigger-request.txt')
 
-          $testMatrix[$test] = @{
+          $testPlan += [pscustomobject]@{
             testName = $test
             buildDefinition = $buildDefinition
             resultPath = $resultPath
           }
         }
 
-        $testMatrixJson = $testMatrix | ConvertTo-Json -Compress -Depth 5
+        $testPlanJson = $testPlan | ConvertTo-Json -Compress -Depth 5
         
         # Set variables
         Write-Host "##vso[task.setvariable variable=tPath;isOutput=true]$newTargetPath"
         Write-Host "##vso[task.setvariable variable=selectedTests;isOutput=true]$($selectedTests -join ',')"
         Write-Host "##vso[task.setvariable variable=batchCount;isOutput=true]$batchCount"
-        Write-Host "##vso[task.setvariable variable=testMatrix;isOutput=true]$testMatrixJson"
+        Write-Host "##vso[task.setvariable variable=testPlan;isOutput=true]$testPlanJson"
         
       name: setup
       displayName: 'Validate and Setup'
 
 #############################################################################
-# STAGE 2: TRIGGER TESTS IN PARALLEL - MATRIX WITH MAX PARALLEL
+# STAGE 2: TRIGGER TESTS IN PARALLEL - SINGLE PARENT ORCHESTRATOR
 #############################################################################
 - stage: TriggerTests
   displayName: '🚀 Trigger Test Pipelines (Parallel Execution)'
@@ -468,12 +468,10 @@ stages:
     tPath: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.tPath'] ]
     selectedTests: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.selectedTests'] ]
     batchCount: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.batchCount'] ]
+    testPlan: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.testPlan'] ]
   jobs:
-  - job: TriggerChildPipelines
-    displayName: 'Trigger Selected Child Pipelines'
-    strategy:
-      maxParallel: ${{ parameters.MaxParallelTests }}
-      matrix: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.testMatrix'] ]
+  - job: OrchestrateChildPipelines
+    displayName: 'Queue and Track Child Pipelines'
     pool:
       name: Interactive
     timeoutInMinutes: 480
@@ -482,34 +480,191 @@ stages:
 
     - powershell: |
         Write-Host "========================================="
-        Write-Host "CHILD PIPELINE TRIGGER"
+        Write-Host "CHILD PIPELINE ORCHESTRATOR"
         Write-Host "========================================="
-        Write-Host "Test Name: $(testName)"
-        Write-Host "Definition: $(buildDefinition)"
-        Write-Host "Result Path: $(resultPath)"
         Write-Host "Requested Max Parallel: ${{ parameters.MaxParallelTests }}"
-      displayName: 'Show Trigger Context'
+        Write-Host "Selected Tests: $(selectedTests)"
+        Write-Host "Result Root: $(tPath)"
 
-    - task: TriggerBuild@4
-      displayName: 'Trigger $(testName) Pipeline'
-      inputs:
-        definitionIsInCurrentTeamProject: true
-        buildDefinition: '$(buildDefinition)'
-        queueBuildForUserThatTriggeredBuild: true
-        waitForQueuedBuildsToFinish: true
-        buildParameters: 'xPath: $(resultPath), Browser: ${{ parameters.Browser }}, Environment: ${{ parameters.Environment }}'
-        password: $(sharedpat)
-      continueOnError: true
+        $organizationUrl = "$(orgUrl)"
+        $projectName = "$(projectName)"
+        $sourceBranch = "$(Build.SourceBranch)"
+        $pollIntervalSeconds = 30
+        $maxParallel = [int]'${{ parameters.MaxParallelTests }}'
+        $hasFailedChildren = $false
+        $hasPartialChildren = $false
+        $definitionCache = @{}
 
-    - powershell: |
+        if (-not $env:ADO_PAT) {
+          Write-Host "##vso[task.logissue type=error]sharedpat is not available."
+          exit 1
+        }
+
+        $base64Auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$($env:ADO_PAT)"))
+        $headers = @{
+          Authorization = "Basic $base64Auth"
+          'Content-Type' = 'application/json'
+        }
+
+        $testPlan = @($(testPlan) | ConvertFrom-Json)
+        if ($testPlan.Count -eq 0) {
+          Write-Host "##vso[task.logissue type=error]No child pipelines were queued for orchestration."
+          exit 1
+        }
+
+        function Get-BuildDefinitionId {
+          param(
+            [string]$DefinitionName
+          )
+
+          if ($definitionCache.ContainsKey($DefinitionName)) {
+            return $definitionCache[$DefinitionName]
+          }
+
+          $encodedName = [Uri]::EscapeDataString($DefinitionName)
+          $definitionUrl = "$organizationUrl$projectName/_apis/build/definitions?name=$encodedName&api-version=7.1"
+          $response = Invoke-RestMethod -Method Get -Uri $definitionUrl -Headers $headers
+          $definition = $response.value | Where-Object { $_.name -eq $DefinitionName } | Select-Object -First 1
+
+          if (-not $definition) {
+            throw "Unable to locate child pipeline definition '$DefinitionName'."
+          }
+
+          $definitionCache[$DefinitionName] = $definition.id
+          return $definition.id
+        }
+
+        function Queue-ChildPipeline {
+          param(
+            [pscustomobject]$TestItem
+          )
+
+          $definitionId = Get-BuildDefinitionId -DefinitionName $TestItem.buildDefinition
+          $queueUrl = "$organizationUrl$projectName/_apis/build/builds?api-version=7.1"
+          $parameterObject = @{
+            xPath = $TestItem.resultPath
+            Browser = '${{ parameters.Browser }}'
+            Environment = '${{ parameters.Environment }}'
+          }
+          $queueBody = @{
+            definition = @{
+              id = $definitionId
+            }
+            sourceBranch = $sourceBranch
+            parameters = ($parameterObject | ConvertTo-Json -Compress)
+            templateParameters = $parameterObject
+          } | ConvertTo-Json -Depth 10
+
+          $queuedBuild = Invoke-RestMethod -Method Post -Uri $queueUrl -Headers $headers -Body $queueBody
+
+          @(
+            "TestName: $($TestItem.testName)"
+            "BuildDefinition: $($TestItem.buildDefinition)"
+            "BuildId: $($queuedBuild.id)"
+            "QueueTime: $($queuedBuild.queueTime)"
+            "SourceBranch: $sourceBranch"
+          ) | Set-Content -Path (Join-Path $TestItem.resultPath 'trigger-queue.txt')
+
+          Write-Host "Queued $($TestItem.testName) as build $($queuedBuild.id)"
+
+          return [pscustomobject]@{
+            testName = $TestItem.testName
+            buildDefinition = $TestItem.buildDefinition
+            resultPath = $TestItem.resultPath
+            buildId = $queuedBuild.id
+          }
+        }
+
+        function Get-BuildRunState {
+          param(
+            [int]$BuildId
+          )
+
+          $statusUrl = "$organizationUrl$projectName/_apis/build/builds/$BuildId?api-version=7.1"
+          return Invoke-RestMethod -Method Get -Uri $statusUrl -Headers $headers
+        }
+
+        $pendingItems = New-Object System.Collections.Queue
+        foreach ($item in $testPlan) {
+          $pendingItems.Enqueue([pscustomobject]@{
+            testName = $item.testName
+            buildDefinition = $item.buildDefinition
+            resultPath = $item.resultPath
+          })
+        }
+
+        $runningItems = @()
+        $completedItems = @()
+
+        while ($pendingItems.Count -gt 0 -or $runningItems.Count -gt 0) {
+          while ($pendingItems.Count -gt 0 -and $runningItems.Count -lt $maxParallel) {
+            $nextItem = $pendingItems.Dequeue()
+            $runningItems += Queue-ChildPipeline -TestItem $nextItem
+          }
+
+          if ($runningItems.Count -eq 0) {
+            break
+          }
+
+          Write-Host "Waiting on $($runningItems.Count) child pipeline(s); $($pendingItems.Count) remaining in queue."
+          Start-Sleep -Seconds $pollIntervalSeconds
+
+          $stillRunning = @()
+          foreach ($runningItem in $runningItems) {
+            $buildState = Get-BuildRunState -BuildId $runningItem.buildId
+            if ($buildState.status -eq 'completed') {
+              $result = if ($buildState.result) { $buildState.result } else { 'unknown' }
+              @(
+                "TestName: $($runningItem.testName)"
+                "BuildDefinition: $($runningItem.buildDefinition)"
+                "BuildId: $($runningItem.buildId)"
+                "Status: $($buildState.status)"
+                "Result: $result"
+                "BuildNumber: $($buildState.buildNumber)"
+                "FinishTime: $($buildState.finishTime)"
+                "BuildUrl: $($buildState._links.web.href)"
+              ) | Set-Content -Path (Join-Path $runningItem.resultPath 'trigger-status.txt')
+
+              switch ($result) {
+                'failed' { $hasFailedChildren = $true }
+                'canceled' { $hasFailedChildren = $true }
+                'partiallySucceeded' { $hasPartialChildren = $true }
+              }
+
+              Write-Host "Completed $($runningItem.testName) with result '$result'."
+              $completedItems += [pscustomobject]@{
+                testName = $runningItem.testName
+                buildId = $runningItem.buildId
+                result = $result
+              }
+            } else {
+              $stillRunning += $runningItem
+            }
+          }
+
+          $runningItems = $stillRunning
+        }
+
+        $summaryPath = Join-Path '$(tPath)' 'orchestration-summary.txt'
         @(
-          "TestName: $(testName)"
-          "BuildDefinition: $(buildDefinition)"
-          "ParentJobStatus: $(Agent.JobStatus)"
-          "CompletedByBuildId: $(Build.BuildId)"
-        ) | Set-Content -Path (Join-Path '$(resultPath)' 'trigger-status.txt')
-      displayName: 'Record Trigger Status'
-      condition: always()
+          "Requested Max Parallel: $maxParallel"
+          "Selected Tests: $(selectedTests)"
+          "Completed Count: $($completedItems.Count)"
+          "Has Partial Children: $hasPartialChildren"
+          "Has Failed Children: $hasFailedChildren"
+        ) | Set-Content -Path $summaryPath
+
+        if ($hasPartialChildren) {
+          Write-Host "##vso[task.logissue type=warning]One or more child pipelines completed with partial success."
+        }
+
+        if ($hasFailedChildren) {
+          Write-Host "##vso[task.logissue type=error]One or more child pipelines failed or were canceled."
+          exit 1
+        }
+      displayName: 'Queue and Track Child Pipelines'
+      env:
+        ADO_PAT: $(sharedpat)
 
 #############################################################################
 # STAGE 3: CONSOLIDATE RESULTS
