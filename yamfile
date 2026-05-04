@@ -422,8 +422,7 @@ stages:
         New-Item -ItemType Directory -Force -Path $newTargetPath | Out-Null
         Write-Host "✓ Created: $newTargetPath"
 
-        # Create a queued execution plan and dedicated result folder for each selected test
-        $testPlan = @()
+        # Create dedicated result folders for each selected test
         foreach ($test in $selectedTests) {
           $buildDefinition = $testDefinitions[$test]
           if (-not $buildDefinition) {
@@ -440,20 +439,12 @@ stages:
             "RequestedByBuildId: $(Build.BuildId)"
           ) | Set-Content -Path (Join-Path $resultPath 'trigger-request.txt')
 
-          $testPlan += [pscustomobject]@{
-            testName = $test
-            buildDefinition = $buildDefinition
-            resultPath = $resultPath
-          }
         }
-
-        $testPlanJson = $testPlan | ConvertTo-Json -Compress -Depth 5
         
         # Set variables
         Write-Host "##vso[task.setvariable variable=tPath;isOutput=true]$newTargetPath"
         Write-Host "##vso[task.setvariable variable=selectedTests;isOutput=true]$($selectedTests -join ',')"
         Write-Host "##vso[task.setvariable variable=batchCount;isOutput=true]$batchCount"
-        Write-Host "##vso[task.setvariable variable=testPlan;isOutput=true]$testPlanJson"
         
       name: setup
       displayName: 'Validate and Setup'
@@ -468,7 +459,6 @@ stages:
     tPath: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.tPath'] ]
     selectedTests: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.selectedTests'] ]
     batchCount: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.batchCount'] ]
-    testPlan: $[ stageDependencies.Setup.ValidateAndPrepare.outputs['setup.testPlan'] ]
   jobs:
   - job: OrchestrateChildPipelines
     displayName: 'Queue and Track Child Pipelines'
@@ -494,6 +484,44 @@ stages:
         $hasFailedChildren = $false
         $hasPartialChildren = $false
         $definitionCache = @{}
+        $testDefinitions = @{
+          'PersonHistory' = 'Test_Auto_STND_Regression_PersonHistory'
+          'ProfilePicture' = 'Test_Auto_STND_Regression_ProfilePicture'
+          'MessageModule' = 'Test_Auto_STND_Regression_MessageModule'
+          'ProgressNote' = 'Test_Auto_STND_Regression_ProgressNote'
+          'Notification' = 'Test_Auto_STND_Regression_Notification'
+          'PostCrisisReview' = 'Test_Auto_STND_Regression_PostCrisisReview'
+          'ProgramApplication' = 'Test_Auto_STND_Regression_ProgramApplication'
+          'ProgramConfig' = 'Carity_STD_F1_RegressionTest_ProgramConfig'
+          'Announcement' = 'Test_Auto_STND_Regression_Annoucement'
+          'StaffModule' = 'Test_Auto_STND_Regression_StaffModule'
+          'OrganizationModule' = 'Test_Auto_Regression_OrganizationModule_CommonBrowser'
+          'PersonProfile' = 'Carity_Std_QC_RegressionTest_Person Profile (SOGI)'
+          'ReportableEvents' = 'Test_Auto_STND_Regression_Reportable_Events'
+          'ServiceDef_01' = 'Test_Auto_STND_Regression_ServiceDef_01'
+          'ServiceDef_02' = 'Test_Auto_STND_Regression_ServiceDef_02'
+          'ProgramEnrollmentNew' = 'Carity_Std_f1_RegressionTest_ProgramEnrollmentNew'
+          'SystemAttachments' = 'Test_Auto_STND_Regression_SystemAttachments'
+          'AttachmentsModule' = 'Test_Auto_STND_Regression_AttachmentsModule'
+          'BMP' = 'Test_Auto_STND_Regression_BMP'
+          'BulkAssignment' = 'Carity_Std_qc_RegressionTest_BulkAssignment'
+          'CrisisBedIntakePacket' = 'Carity_STND_RegressionTest_CrisisBedIntakePacket'
+          'CrisisHousingAssessment' = 'Carity_STND_RegressionTest_Crisis_Housing_Assessment'
+          'CrisisIntake' = 'Carity_STND_RegressionTest_Crisis_Intake'
+          'CrisisHomeIntake' = 'Carity_Std_CrisisHomeIntakeModule'
+          'CrisisTemporaryHousing' = 'Carity_STND_RegressionTest_Crisis_Temporary_Housing'
+          'CrisisHousingAgreement' = 'Carity_STND_RegressionTest_Crisis_Housing_Agreement'
+          'DeathandMortality' = 'Test_Auto_STND_Regression_DeathandMortality'
+          'EmergencyDisposition' = 'Test_Auto_STND_Regression_EmergencyDisposition'
+          'GrievanceAppeal_01' = 'Test_Auto_STND_Regression_GrievanceAppeal_01'
+          'GrievanceAppeal_02' = 'Test_Auto_STND_Regression_GrievanceAppeal_02'
+          'Help' = 'Test_Auto_STND_Regression_Help'
+          'LocationsModule' = 'Test_Auto_STND_Regression_LocationsModule'
+          'IndividualSupportTeam' = 'Test_Auto_STND_Regression_IndividualSupportTeam'
+          'MiniPCP' = 'Carity_STND_Regression Test_Mini PCP_F1'
+          'ConfigDashboard' = 'Carity_STDF1_Config Dashboard'
+          'PersonMaintenance' = 'Carity_Std_f1_RegressionTest_PersonMaintenance'
+        }
 
         if (-not $env:ADO_PAT) {
           Write-Host "##vso[task.logissue type=error]sharedpat is not available."
@@ -506,8 +534,23 @@ stages:
           'Content-Type' = 'application/json'
         }
 
-        $testPlanJson = $env:TEST_PLAN_JSON
-        $testPlan = @($testPlanJson | ConvertFrom-Json)
+        $selectedTests = @("$(selectedTests)".Split(',', [System.StringSplitOptions]::RemoveEmptyEntries))
+        $testPlan = @()
+        foreach ($testName in $selectedTests) {
+          $trimmedTestName = $testName.Trim()
+          $buildDefinition = $testDefinitions[$trimmedTestName]
+          if (-not $buildDefinition) {
+            Write-Host "##vso[task.logissue type=error]Missing child pipeline definition for test '$trimmedTestName'."
+            exit 1
+          }
+
+          $testPlan += [pscustomobject]@{
+            testName = $trimmedTestName
+            buildDefinition = $buildDefinition
+            resultPath = "$(tPath)\$trimmedTestName"
+          }
+        }
+
         if ($testPlan.Count -eq 0) {
           Write-Host "##vso[task.logissue type=error]No child pipelines were queued for orchestration."
           exit 1
@@ -666,7 +709,6 @@ stages:
       displayName: 'Queue and Track Child Pipelines'
       env:
         ADO_PAT: $(sharedpat)
-        TEST_PLAN_JSON: $(testPlan)
 
 #############################################################################
 # STAGE 3: CONSOLIDATE RESULTS
